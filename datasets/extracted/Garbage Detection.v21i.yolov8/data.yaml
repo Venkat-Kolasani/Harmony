@@ -1,0 +1,13 @@
+train: ../train/images
+val: ../valid/images
+test: ../test/images
+
+nc: 4
+names: ['Aluminum Can', 'Glass Bottle', 'HDPEM', 'PET']
+
+roboflow:
+  workspace: objdetection-5v2kz
+  project: garbage-detection-sht1u
+  version: 21
+  license: CC BY 4.0
+  url: https://universe.roboflow.com/objdetection-5v2kz/garbage-detection-sht1u/dataset/21
