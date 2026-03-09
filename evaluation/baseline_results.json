@@ -1,0 +1,7 @@
+{
+  "model": "yolov8n.pt (baseline - COCO pretrained)",
+  "mAP50": 0.1018,
+  "mAP50-95": 0.0673,
+  "Precision": 0.1434,
+  "Recall": 0.2333
+}
