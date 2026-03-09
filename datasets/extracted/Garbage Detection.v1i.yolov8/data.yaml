@@ -1,0 +1,13 @@
+train: ../train/images
+val: ../valid/images
+test: ../test/images
+
+nc: 8
+names: ['cardboard_waste', 'glass_waste', 'metal_waste', 'plastic_waste', 'rubber_waste', 'styrofoam_waste', 'textile_waste', 'wood_waste']
+
+roboflow:
+  workspace: davids-workspace
+  project: garbage-detection-mnj17
+  version: 1
+  license: CC BY 4.0
+  url: https://universe.roboflow.com/davids-workspace/garbage-detection-mnj17/dataset/1
