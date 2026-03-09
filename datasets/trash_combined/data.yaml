@@ -1,0 +1,7 @@
+names:
+- litter
+nc: 1
+path: /Users/venkat/Library/CloudStorage/OneDrive-Personal/Desktop/INTI/HARMONY/datasets/trash_combined
+test: test/images
+train: train/images
+val: valid/images
