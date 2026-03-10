@@ -1,0 +1,7 @@
+{
+  "model": "harmony_trash_v3 (fine-tuned, 20 epochs)",
+  "mAP50": 0.7981,
+  "mAP50-95": 0.6331,
+  "Precision": 0.8147,
+  "Recall": 0.6789
+}

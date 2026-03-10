@@ -3,29 +3,29 @@ import json, os
 
 model = YOLO('yolov8n.pt')
 
-print("Starting fine-tuning on trash_combined dataset...")
-print("This will take a while on CPU. Do not close the terminal.\n")
+print("Starting training — no mid-training validation to prevent memory kills")
 
 results = model.train(
     data='datasets/trash_combined/data.yaml',
-    epochs=50,
-    imgsz=640,
-    batch=8,          # 8 is safe for M3 MacBook
-    name='harmony_trash_v1',
-    patience=10,
-    device='mps',     # Apple M3 GPU — faster than CPU
-    workers=4
+    epochs=20,
+    imgsz=416,
+    batch=4,
+    name='harmony_trash_v3',
+    patience=0,        # Disable early stopping — no val needed
+    device='mps',
+    workers=0,
+    cache=False,
+    fraction=0.3,      # ~5000 images — lighter
+    optimizer='AdamW',
+    lr0=0.001,
+    val=False,         # KEY FIX — skip validation during training entirely
 )
 
-print("\nTraining complete.")
-print(f"Best weights saved at: {results.save_dir}/weights/best.pt")
+print(f"\nTraining complete. Weights at: {results.save_dir}/weights/last.pt")
 
-# Save training summary
 os.makedirs("evaluation", exist_ok=True)
-summary = {
-    "model": "harmony_trash_v1 (fine-tuned on 18485 images)",
-    "epochs_completed": results.epoch + 1 if hasattr(results, 'epoch') else 50,
-    "best_weights": str(results.save_dir) + "/weights/best.pt"
-}
 with open("evaluation/training_summary.json", "w") as f:
-    json.dump(summary, f, indent=2)
+    json.dump({
+        "model": "harmony_trash_v3",
+        "weights": str(results.save_dir) + "/weights/last.pt"
+    }, f, indent=2)

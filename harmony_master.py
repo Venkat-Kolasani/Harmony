@@ -7,7 +7,7 @@ import time  # Import Time to handle delays and timeouts
 import numpy as np  # Import Numpy to create the UI background bar
 
 # --- 1. INITIALIZATION ---
-model = YOLO('yolov8n.pt')  # Load the standard pre-trained YOLOv8 Nano model
+model = YOLO('runs/detect/harmony_trash_v3/weights/last.pt')
 pygame.mixer.init()  # Initialize the audio player engine
 cap = cv2.VideoCapture(0)  # Connect to the default computer webcam
 
@@ -24,8 +24,8 @@ class HarmonyHOL:
         self.waste_verify_count = 0  # Counter to confirm trash is real (prevents flickering)
         self.threshold_nudge = 350  # Distance limit: if person moves further, AI nudges
         self.threshold_bin = 150  # Distance limit: trash must be this close to bin
-        self.waste_ids = [39, 41, 45, 67]  # COCO IDs for Bottle, Cup, Bowl, Phone
-        self.bin_id = 26  # COCO ID for Handbag (used as a proxy for Bin)
+        self.waste_ids = [0]   # Retrained model uses class 0 for all litter
+        self.bin_id = None     # Bin detection removed — not in retrained dataset
         self.current_state = "IDLE"  # The starting status of the system
         self.person_was_near_waste = False  # Did the person actually touch the trash?
 
@@ -37,9 +37,7 @@ class HarmonyHOL:
                 cls = int(box.cls[0])  # Get the ID of the object
                 coords = box.xyxy[0]  # Get coordinates [x1, y1, x2, y2]
                 center = (int((coords[0] + coords[2]) / 2), int((coords[1] + coords[3]) / 2))  # Calculate center point
-                if cls == 0: person = center  # If ID 0, it's a Person
-                elif cls in self.waste_ids: waste = center  # If in waste list, it's Trash
-                elif cls == self.bin_id: bin_loc = center  # If ID 26, it's the Bin
+                if cls == 0: waste = center  # If ID 26, it's the Bin
         return person, waste, bin_loc, results[0].plot()  # Return positions and the visual frame
 
     def spatial_analysis(self, p, w, b):
