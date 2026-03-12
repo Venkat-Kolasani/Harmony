@@ -38,7 +38,7 @@ class ColorSegmentationDetector:
                 (np.array([10, 100, 100]),  np.array([20, 255, 255]))
             ],
             "white_styrofoam": [
-                (np.array([0, 0, 200]),     np.array([179, 30, 255]))     # Low saturation, high brightness
+                (np.array([0, 0, 200]), np.array([179, 30, 245]))  # Cap V at 245 not 255
             ],
             "blue_plastic": [
                 (np.array([100, 100, 100]), np.array([130, 255, 255]))
@@ -46,8 +46,8 @@ class ColorSegmentationDetector:
         }
 
         # --- Stage 3: Contour Filtering Parameters ---
-        self.min_contour_area = 500    # Minimum pixel area — smaller = noise, ignored
-        self.max_contour_area = 50000  # Maximum pixel area — larger = person/bag, ignored
+        self.min_contour_area = 1500    # Minimum pixel area — smaller = noise, ignored
+        self.max_contour_area = 30000  # Maximum pixel area — larger = person/bag, ignored
 
         # --- Detection Output ---
         self.secondary_detections = []  # List of bounding boxes found by this module
