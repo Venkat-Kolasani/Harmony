@@ -22,9 +22,10 @@ coco_model = YOLO('yolov8n.pt')
 
 # COCO class IDs to use as exclusion zones for the secondary pipeline.
 # These are objects the color module might falsely flag as litter.
-# 0=person, 56=chair, 57=couch, 58=potted plant, 60=dining table,
+# 0=person, 24=backpack, 26=handbag, 28=suitcase,
+# 56=chair, 57=couch, 58=potted plant, 60=dining table,
 # 63=laptop, 72=tv, 74=clock
-COCO_EXCLUSION_IDS = {0, 56, 57, 58, 60, 63, 72, 74}
+COCO_EXCLUSION_IDS = {0, 24, 26, 28, 56, 57, 58, 60, 63, 72, 74}
 
 # COCO class names for display labels
 COCO_NAMES = coco_model.names   # dict: {0: 'person', 1: 'bicycle', ...}

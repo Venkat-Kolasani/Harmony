@@ -46,7 +46,7 @@ class ColorSegmentationDetector:
                 (np.array([10, 100, 100]), np.array([20, 255, 255]))
             ],
             "white_styrofoam": [
-                (np.array([0, 0, 200]), np.array([179, 30, 245]))         # Cap V at 245, not 255
+                (np.array([0, 0, 190]), np.array([179, 40, 255]))         # Widened: catches receipts, paper, styrofoam
             ],
             "blue_plastic": [
                 (np.array([100, 100, 100]), np.array([130, 255, 255]))
@@ -54,7 +54,7 @@ class ColorSegmentationDetector:
         }
 
         # --- Stage 3: Contour Filtering Parameters ---
-        self.min_contour_area = 1500   # Below this = sensor noise or tiny reflection
+        self.min_contour_area = 800    # Lowered from 1500 — catches small receipts and flat paper litter
         self.max_contour_area = 20000  # Above this = wall, person, large shadow (tightened from 30000)
 
         # --- Stage 5: Duration Filter ---
@@ -223,7 +223,7 @@ class ColorSegmentationDetector:
     # =============================================
     # STAGE 5: DURATION FILTER
     # =============================================
-    def apply_duration_filter(self, candidates):
+    def apply_duration_filter(self, candidates, exclusion_boxes=[]):
         """
         Only accepts detections that have persisted in the same position for
         at least DURATION_THRESHOLD consecutive frames.
@@ -232,8 +232,14 @@ class ColorSegmentationDetector:
         Each bucket accumulates a frame count. Buckets that reach the threshold
         are accepted. Buckets not seen this frame are decremented and removed.
 
-        Walking people: clear position in <15 frames → never accepted.
-        Dropped litter: stays → accumulates → accepted after ~0.5s.
+        Exclusion zone clearing: any bucket whose center falls inside an exclusion
+        box (person, bag etc.) is immediately zeroed — even if it had been
+        accumulating from before COCO detected the object. This prevents a person
+        who stands still from eventually passing the duration threshold.
+
+        Walking people:  clear position in <15 frames → never accepted.
+        Standing people: bucket zeroed every frame by exclusion zone → never accepted.
+        Dropped litter:  stays, accumulates, accepted after ~0.5s.
         """
         # Build set of active buckets this frame
         active_buckets = set()
@@ -242,6 +248,16 @@ class ColorSegmentationDetector:
             cy = ((y1 + y2) // 2) // self.POSITION_TOLERANCE
             active_buckets.add((cx, cy))
             self._duration_tracker[(cx, cy)] = self._duration_tracker.get((cx, cy), 0) + 1
+
+        # Zero out any bucket whose real-world position falls inside an exclusion zone.
+        # Converts bucket coords back to pixel coords for the center-point check.
+        for bucket in list(self._duration_tracker.keys()):
+            bx = bucket[0] * self.POSITION_TOLERANCE + self.POSITION_TOLERANCE // 2
+            by = bucket[1] * self.POSITION_TOLERANCE + self.POSITION_TOLERANCE // 2
+            for ebox in exclusion_boxes:
+                if ebox[0] < bx < ebox[2] and ebox[1] < by < ebox[3]:
+                    self._duration_tracker[bucket] = 0
+                    break
 
         # Decrement and clean up buckets not seen this frame
         for bucket in list(self._duration_tracker.keys()):
@@ -295,7 +311,8 @@ class ColorSegmentationDetector:
         filtered = self.fusion_gate(all_secondary, yolo_litter_boxes, exclusion_boxes)
 
         # Stage 5 — remove transient detections (walking people, flickering)
-        confirmed = self.apply_duration_filter(filtered)
+        # Also passes exclusion_boxes so standing people never accumulate past threshold
+        confirmed = self.apply_duration_filter(filtered, exclusion_boxes)
 
         self.secondary_detections = confirmed
         return confirmed, bg_mask, hsv_mask
