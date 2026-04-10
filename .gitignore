@@ -3,3 +3,11 @@ __pycache__/
 *.pyc
 .DS_Store
 .qodo/
+
+# Ignore local video assets
+*.mp4
+*.mov
+*.avi
+*.mkv
+*.wmv
+*.webm
