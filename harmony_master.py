@@ -5,9 +5,17 @@ import math
 import os
 import time
 import csv
+import gc
+import logging
+import traceback
 import numpy as np
 from datetime import datetime
 from color_segmentation import ColorSegmentationDetector
+
+try:
+    import torch
+except Exception:
+    torch = None
 
 # =============================================================================
 # MODEL INITIALIZATION
@@ -18,14 +26,65 @@ coco_model   = YOLO('yolov8n.pt')
 COCO_EXCLUSION_IDS = {0, 24, 26, 28, 56, 57, 58, 60, 63, 72, 74}
 COCO_NAMES         = coco_model.names
 
-pygame.mixer.init()
-cap = cv2.VideoCapture(0)
+# =============================================================================
+# RUNTIME CONFIG / LOGGING
+# =============================================================================
+RUNTIME_TS = datetime.now().strftime('%Y%m%d_%H%M%S')
+DEBUG_LOG  = f"harmony_debug_{RUNTIME_TS}.log"
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(message)s',
+    handlers=[
+        logging.FileHandler(DEBUG_LOG),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger("harmony")
+
+CAMERA_INDEX            = int(os.getenv("HARMONY_CAMERA_INDEX", "0"))
+FRAME_FAIL_RETRY_SLEEP  = float(os.getenv("HARMONY_FRAME_RETRY_SLEEP", "0.08"))
+RECONNECT_AFTER_FAILS   = int(os.getenv("HARMONY_RECONNECT_AFTER_FAILS", "12"))
+RECONNECT_MAX_ATTEMPTS  = int(os.getenv("HARMONY_RECONNECT_MAX_ATTEMPTS", "30"))
+MAINTENANCE_EVERY_FRAMES = int(os.getenv("HARMONY_MAINTENANCE_EVERY_FRAMES", "150"))
+SIMULATE_CAMERA_DROPS   = os.getenv("HARMONY_SIMULATE_CAMERA_DROPS", "0") == "1"
+SIM_DROP_EVERY          = max(2, int(os.getenv("HARMONY_SIM_DROP_EVERY", "75")))
+
+def _init_audio():
+    try:
+        pygame.mixer.init()
+        logger.info("Audio initialized.")
+        return True
+    except Exception:
+        logger.exception("Audio initialization failed; continuing without audio.")
+        return False
+
+def _open_camera(camera_idx=0, attempts=5, delay=0.35):
+    for i in range(1, attempts + 1):
+        cap_obj = cv2.VideoCapture(camera_idx)
+        try:
+            cap_obj.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        except Exception:
+            pass
+        if cap_obj is not None and cap_obj.isOpened():
+            logger.info("Camera initialized (index=%s) on attempt %s/%s.", camera_idx, i, attempts)
+            return cap_obj
+        logger.warning("Camera open failed (index=%s), attempt %s/%s.", camera_idx, i, attempts)
+        try:
+            cap_obj.release()
+        except Exception:
+            pass
+        time.sleep(delay)
+    logger.error("Unable to initialize camera after %s attempts.", attempts)
+    return None
+
+audio_enabled = _init_audio()
+cap = _open_camera(CAMERA_INDEX, attempts=8)
 color_detector = ColorSegmentationDetector()
 
 # =============================================================================
 # DETECTION LOG
 # =============================================================================
-LOG_FILE        = f"harmony_log_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+LOG_FILE        = f"harmony_log_{RUNTIME_TS}.csv"
 _log_fh         = open(LOG_FILE, 'w', newline='')
 _log_writer     = csv.writer(_log_fh)
 _log_writer.writerow(["timestamp","frame","label","cx","cy","x1","y1","x2","y2","source"])
@@ -133,7 +192,12 @@ class HarmonyHOL:
         excl_boxes = []
 
         # --- Litter model ---
-        lr = litter_model.predict(frame, conf=0.50, verbose=False)
+        try:
+            logger.debug("Frame %s: running litter model inference.", self.frame_num)
+            lr = litter_model.predict(frame, conf=0.50, verbose=False)
+        except Exception:
+            logger.exception("Frame %s: litter model inference failed.", self.frame_num)
+            raise
         n_yolo = 0
         for r in lr:
             for box in r.boxes:
@@ -148,8 +212,13 @@ class HarmonyHOL:
         visual = lr[0].plot()
 
         # --- COCO model ---
-        cr = coco_model.predict(frame, conf=0.45, verbose=False,
-                                classes=list(COCO_EXCLUSION_IDS))
+        try:
+            logger.debug("Frame %s: running COCO model inference.", self.frame_num)
+            cr = coco_model.predict(frame, conf=0.45, verbose=False,
+                                    classes=list(COCO_EXCLUSION_IDS))
+        except Exception:
+            logger.exception("Frame %s: COCO model inference failed.", self.frame_num)
+            raise
         for r in cr:
             for box in r.boxes:
                 cls = int(box.cls[0])
@@ -162,8 +231,12 @@ class HarmonyHOL:
                 if cls == 0: person = ((x1+x2)//2,(y1+y2)//2)
 
         # --- Color segmentation ---
-        secs, bg_mask, hsv_mask = color_detector.detect(
-            frame, yolo_litter_boxes=yolo_boxes, exclusion_boxes=excl_boxes)
+        try:
+            secs, bg_mask, hsv_mask = color_detector.detect(
+                frame, yolo_litter_boxes=yolo_boxes, exclusion_boxes=excl_boxes)
+        except Exception:
+            logger.exception("Frame %s: color segmentation failed.", self.frame_num)
+            raise
         self.secondary_count = len(secs)
         stats.rec_sec(self.secondary_count)
         stats.frames += 1
@@ -176,6 +249,8 @@ class HarmonyHOL:
         if waste is None and secs:
             x1,y1,x2,y2,_ = secs[0]
             waste = ((x1+x2)//2,(y1+y2)//2)
+
+        del lr, cr
 
         return person, waste, bin_loc, visual, bg_mask, hsv_mask
 
@@ -237,10 +312,45 @@ class HarmonyHOL:
     def execute_action(self, fname):
         if os.path.exists(fname):
             try:
-                if not pygame.mixer.music.get_busy():
+                if audio_enabled and (not pygame.mixer.music.get_busy()):
                     pygame.mixer.music.load(fname); pygame.mixer.music.play()
                     if fname=="thankyou.mp3": audio_ind.trigger("THANK YOU")
-            except: pass
+            except Exception:
+                logger.exception("Audio action failed for file: %s", fname)
+
+
+def _maintenance_tick(frame_idx):
+    if frame_idx % MAINTENANCE_EVERY_FRAMES != 0:
+        return
+    try:
+        gc.collect()
+        if torch is not None and torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            logger.debug("Frame %s: performed gc + torch.cuda.empty_cache().", frame_idx)
+        else:
+            logger.debug("Frame %s: performed gc.collect().", frame_idx)
+    except Exception:
+        logger.exception("Maintenance tick failed at frame %s.", frame_idx)
+
+
+def _safe_release_camera(cam):
+    try:
+        if cam is not None:
+            cam.release()
+    except Exception:
+        logger.exception("Camera release failed.")
+
+
+def _cleanup(cam):
+    _safe_release_camera(cam)
+    try:
+        cv2.destroyAllWindows()
+    except Exception:
+        logger.exception("cv2.destroyAllWindows failed.")
+    try:
+        _log_fh.close()
+    except Exception:
+        logger.exception("Detection CSV close failed.")
 
 
 # =============================================================================
@@ -348,36 +458,102 @@ print("  MAGENTA = secondary color pipeline")
 print("  Box thickness ∝ detection confidence (frames held)")
 print("  Press Q to quit")
 print("="*55)
+print(f"  Debug log: {DEBUG_LOG}")
 
-while cap.isOpened():
-    ok, frame = cap.read()
-    if not ok: break
+logger.info("Application startup complete.")
+logger.info("Detection CSV: %s", LOG_FILE)
+logger.info("Debug log: %s", DEBUG_LOG)
+logger.info("Camera index=%s, reconnect_after_fails=%s, reconnect_max_attempts=%s",
+            CAMERA_INDEX, RECONNECT_AFTER_FAILS, RECONNECT_MAX_ATTEMPTS)
+if SIMULATE_CAMERA_DROPS:
+    logger.warning("Camera drop simulation enabled. Dropping every %s frames.", SIM_DROP_EVERY)
 
-    p,w,b,vis,bg,hsv = hol.perception(frame)
-    dpw, dwb = hol.spatial_analysis(p,w,b)
-    hol.orchestrate(dpw,dwb, w is not None, p is not None, b is not None)
+frame_fail_streak = 0
+reconnect_attempts = 0
 
-    is_comp = hol.thanked and hol.current_state=="COMPLIANCE"
-    frame_out = build_display(vis,bg,hsv,
-                              hol.current_state,p,w,b,
-                              hol.waste_gone_frames,hol.required_frames,
-                              hol.total_cleanups, is_comp,
-                              hol.secondary_count)
-    cv2.imshow("HARMONY HOL", frame_out)
+try:
+    while True:
+        try:
+            if cap is None or (not cap.isOpened()):
+                reconnect_attempts += 1
+                logger.warning("Camera is unavailable. Reconnect attempt %s/%s.",
+                               reconnect_attempts, RECONNECT_MAX_ATTEMPTS)
+                cap = _open_camera(CAMERA_INDEX, attempts=2, delay=0.5)
+                if cap is None:
+                    if reconnect_attempts >= RECONNECT_MAX_ATTEMPTS:
+                        logger.error("Reached max reconnect attempts; pausing before retry cycle.")
+                        reconnect_attempts = 0
+                        time.sleep(1.0)
+                    cv2.waitKey(1)
+                    continue
+                reconnect_attempts = 0
 
-    if is_comp:
-        cv2.waitKey(1)
-        hol.execute_action("thankyou.mp3")
-        hol.total_cleanups+=1; stats.cleanup_count+=1
-        time.sleep(2); hol.reset_system(); continue
+            ok, frame = cap.read()
+            if SIMULATE_CAMERA_DROPS and (hol.frame_num > 0) and (hol.frame_num % SIM_DROP_EVERY == 0):
+                ok, frame = False, None
 
-    if cv2.waitKey(1) & 0xFF == ord('q'): break
+            if (not ok) or (frame is None) or (getattr(frame, 'size', 0) == 0):
+                frame_fail_streak += 1
+                logger.warning("Frame capture failed (streak=%s).", frame_fail_streak)
+                if frame_fail_streak >= RECONNECT_AFTER_FAILS:
+                    logger.warning("Frame failure threshold reached. Releasing and reconnecting camera.")
+                    _safe_release_camera(cap)
+                    cap = None
+                    frame_fail_streak = 0
+                cv2.waitKey(1)
+                time.sleep(FRAME_FAIL_RETRY_SLEEP)
+                continue
 
-cap.release()
-cv2.destroyAllWindows()
-_log_fh.close()
+            frame_fail_streak = 0
+
+            try:
+                p,w,b,vis,bg,hsv = hol.perception(frame)
+                dpw, dwb = hol.spatial_analysis(p,w,b)
+                hol.orchestrate(dpw,dwb, w is not None, p is not None, b is not None)
+
+                is_comp = hol.thanked and hol.current_state=="COMPLIANCE"
+                frame_out = build_display(vis,bg,hsv,
+                                          hol.current_state,p,w,b,
+                                          hol.waste_gone_frames,hol.required_frames,
+                                          hol.total_cleanups, is_comp,
+                                          hol.secondary_count)
+                cv2.imshow("HARMONY HOL", frame_out)
+
+                if is_comp:
+                    cv2.waitKey(1)
+                    hol.execute_action("thankyou.mp3")
+                    hol.total_cleanups+=1; stats.cleanup_count+=1
+                    time.sleep(2); hol.reset_system();
+
+                _maintenance_tick(hol.frame_num)
+
+                # Small delay / poll to keep UI responsive and avoid CPU saturation.
+                if cv2.waitKey(1) & 0xFF == ord('q'):
+                    logger.info("Quit requested by user.")
+                    break
+
+            except Exception as loop_err:
+                logger.error("Per-frame processing error: %s", loop_err)
+                logger.error(traceback.format_exc())
+                if cv2.waitKey(1) & 0xFF == ord('q'):
+                    logger.info("Quit requested by user after frame exception.")
+                    break
+                time.sleep(0.01)
+                continue
+
+        except KeyboardInterrupt:
+            logger.info("KeyboardInterrupt received. Exiting cleanly.")
+            break
+        except Exception as outer_loop_err:
+            logger.error("Main loop exception: %s", outer_loop_err)
+            logger.error(traceback.format_exc())
+            time.sleep(0.05)
+            continue
+finally:
+    _cleanup(cap)
 
 print(f"\nSession ended. Log → {LOG_FILE}")
+print(f"Debug log        : {DEBUG_LOG}")
 print(f"YOLO detections  : {stats.total_yolo}")
 print(f"SEC  detections  : {stats.total_secondary}")
 print(f"Frames processed : {stats.frames}")
