@@ -4,6 +4,10 @@ __pycache__/
 .DS_Store
 .qodo/
 
+# Ignore generated Harmony runtime logs
+harmony_log_*.csv
+harmony_debug_*.log
+
 # Ignore local video assets
 *.mp4
 *.mov

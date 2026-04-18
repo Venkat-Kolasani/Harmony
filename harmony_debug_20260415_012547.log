@@ -1,8 +1,0 @@
-2026-04-15 01:25:47,992 [INFO] Audio initialized.
-2026-04-15 01:25:49,526 [INFO] Camera initialized (index=0) on attempt 1/8.
-2026-04-15 01:25:50,104 [INFO] Application startup complete.
-2026-04-15 01:25:50,104 [INFO] Detection CSV: harmony_log_20260415_012547.csv
-2026-04-15 01:25:50,106 [INFO] Debug log: harmony_debug_20260415_012547.log
-2026-04-15 01:25:50,106 [INFO] Camera index=0, reconnect_after_fails=12, reconnect_max_attempts=30
-2026-04-15 01:25:51,107 [WARNING] Frame capture failed (streak=1).
-2026-04-15 01:27:55,107 [INFO] KeyboardInterrupt received. Exiting cleanly.

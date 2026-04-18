@@ -1,4 +1,0 @@
-timestamp,frame,label,cx,cy,x1,y1,x2,y2,source
-17:23:51.276,1,litter_yolo,1071,394,232,59,1910,730,YOLO
-17:23:51.276,1,litter_yolo,969,526,19,69,1920,984,YOLO
-17:23:52.817,10,litter_yolo,961,505,2,18,1920,993,YOLO
